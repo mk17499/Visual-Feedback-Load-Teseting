@@ -356,7 +356,7 @@ class Server:
         self.s.close()
 
 if __name__ == "__main__":
-    PORT = 8080
+    PORT = 8000
     IP = '127.0.0.1'
 
     server = Server(IP, PORT)

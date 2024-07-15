@@ -9,13 +9,17 @@
 #include <netinet/in.h>
 #include <fcntl.h>
 #include <sys/epoll.h>
-#include "/home/mkdluffy/Desktop/Audio communication/Visual_feedback_for_audio_communication/json-develop/single_include/nlohmann/json.hpp"
-// #include "nlohmann/json.hpp"
+// #include "/home/mkdluffy/Desktop/Audio communication/Visual_feedback_for_audio_communication/json-develop/single_include/nlohmann/json.hpp"
+#include "nlohmann/json.hpp"
 #include <queue>
 #include <thread>
 #include <mutex>
 #include <arpa/inet.h>
 #include <time.h>
+#include <csignal>
+#include <cstdlib>
+#include <atomic>
+#include <arpa/inet.h>
 #define PORT 5000
 #define MAX_BUFFER_SIZE 1024
 using namespace std;
@@ -24,6 +28,7 @@ const int MAX_EVENTS = 100;
 // for audio and ack sockets
 int is_host = 1;
 int server_fd, new_socket, valread;
+atomic<int> audio_packet_count(0);
 float packets_forwarded = 0, packets_acknowledged=0;
 map<string, pair<string, int>> hostClients;                        // This is used to store the clients in a room
 map<string, string> roomID_Hosts;                                  // This is a map that stores all the call hosts of a particular room
@@ -47,6 +52,7 @@ map<int, int> socket_type;
 
 int audio_send, audio_send_host, ack_send, rr_send; // create fd for sending out respective data
 // ofstream outputFile("data_to_send.pcm", std::ios::binary);
+
 int handleTCPSocketEvent(int socket_fd, int epoll_fd)
 {
     int audio_socket, ack_socket, rr_socket;
@@ -63,6 +69,7 @@ int handleTCPSocketEvent(int socket_fd, int epoll_fd)
     //memset(buffer, 0, sizeof(buffer));
     cout << "Received_data = " << received_data << "\n";
     cout<<"----Line Number 65\n-------------";
+    memset(buffer,0,sizeof(buffer));
 
     // cout << "Received data: " << received_data << endl; // For debugging
 

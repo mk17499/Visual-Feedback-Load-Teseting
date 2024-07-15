@@ -15,6 +15,9 @@
 #include <mutex>
 #include <arpa/inet.h>
 #include <time.h>
+#include <cstdlib>
+#include <atomic>
+#include <csignal>
 #define PORT 5000
 #define MAX_BUFFER_SIZE 1024
 using namespace std;
@@ -41,10 +44,14 @@ int addrlen = sizeof(address);
 char buffer[1024] = {0};
 struct epoll_event event;
 struct epoll_event events[MAX_EVENTS];
+// atomic<int> audio_packet_count(0);
 map<int, pair<pair<string, int>, pair<pair<string, int>, pair<string, int>>>> reference_table; // (ssrc-----------> ((audio_ip_address,audio_port number),((ack_ip,ack_port),(rr_ip,rr_port))))
 
 map<int, int> socket_type;
-
+// void signalHandler(int signum) {
+//     std::cout << "Total audio packets forwarded: " << audio_packet_count << std::endl;
+//     exit(signum);
+// }
 int audio_send, audio_send_host, ack_send, rr_send; // create fd for sending out respective data
 // ofstream outputFile("data_to_send.pcm", std::ios::binary);
 // int handleTCPSocketEvent(int socket_fd, int epoll_fd)
@@ -76,15 +83,42 @@ int handleTCPSocketEvent(int socket_fd, int epoll_fd)
     // Receive data from the client
     valread = recv(socket_fd, buffer, sizeof(buffer), 0);
     cout << "Buffer = " << buffer << "valread = " << valread << endl;
+    
     // Convert received data to a string
-    string received_data;
-    received_data = string(buffer);
-    // memset(buffer, 0, sizeof(buffer));
+    string received_data(buffer, valread);
     cout << "Received_data = " << received_data << "\n";
-    cout << "----Line Number 65\n-------------";
 
-    // cout << "Received data: " << received_data << endl; // For debugging
+    // Sanitize the received data
+    // Ensure the string starts with '[' and ends with ']'
+    if (received_data.front() != '[') {
+        received_data = '[' + received_data;
+    }
+    if (received_data.back() != ']') {
+        received_data += ']';
+    }
 
+    // Remove any extra ']' characters within the string
+    string sanitized_data;
+    bool inside_quotes = false;
+    for (size_t i = 0; i < received_data.size(); ++i) {
+        if (received_data[i] == '"') {
+            inside_quotes = !inside_quotes; // Toggle the inside_quotes flag
+        }
+        if (received_data[i] == ']' && !inside_quotes && i != received_data.size() - 1) {
+            continue; // Skip this ']' if it's not the last character and not inside quotes
+        }
+        sanitized_data += received_data[i];
+    }
+
+    received_data = sanitized_data;
+    cout << "Sanitized received data: " << received_data << endl;
+
+    // Check if the sanitized data is a valid JSON array
+    if (received_data[0] != '[' || received_data[received_data.length() - 1] != ']') 
+    {
+        cerr << "Invalid data format. Ignoring packet." << endl;
+        return 1; // Or handle the error as appropriate
+    }
     // Parse the JSON string into a list
     using json = nlohmann::json;
     json client_info;
@@ -101,7 +135,7 @@ int handleTCPSocketEvent(int socket_fd, int epoll_fd)
         // ...
         return 1; // Or return an appropriate error code
     }
-
+    memset(buffer,0,sizeof(buffer));
     // Send the response back to the client
     // send(new_socket, response.c_str(), response.length(), 0);
 
@@ -514,6 +548,7 @@ void handleUDPSocketEvent(int room_fd) // room sockets include audio, ack and rr
                 // outputFile.write(buffer, audio_valread);
                 ssize_t bytesSent = sendto(room_fd, buffer, audio_valread, 0,
                                            reinterpret_cast<struct sockaddr *>(&clientAddress), sizeof(clientAddress));
+                packets_forwarded++;
                 if (bytesSent > 0)
                     packets_acknowledged++;
                 if (bytesSent == -1)
@@ -538,6 +573,8 @@ void handleUDPSocketEvent(int room_fd) // room sockets include audio, ack and rr
         //  extracting the list of IP addresses in that particular room. First we get the roomID from the port number using the reverse mapping.
         // cout<<"After adding hosts, size of roomID buffer is "<<sizeof(roomID_IP_ports[roomid])<<endl;
         map<int, string>::iterator it;
+        cout << "Total number of packets forwarder = " << packets_forwarded<<endl;
+        packets_forwarded++;
         string roomid;
         it = audioSocket_RoomID.find(room_fd);
         if (it != audioSocket_RoomID.end())
@@ -567,8 +604,11 @@ void handleUDPSocketEvent(int room_fd) // room sockets include audio, ack and rr
                 // outputFile.write(buffer, audio_valread);
                 ssize_t bytesSent = sendto(room_fd, buffer, audio_valread, 0,
                                            reinterpret_cast<struct sockaddr *>(&clientAddress), sizeof(clientAddress));
+                //audio_packet_count++;
                 if (bytesSent > 0)
-                    packets_forwarded++;
+                {
+                    // move on
+                }
 
                 if (bytesSent == -1)
                 {
@@ -582,6 +622,7 @@ void handleUDPSocketEvent(int room_fd) // room sockets include audio, ack and rr
 int main()
 {
     int epoll_fd = epoll_create1(0);
+    //signal(SIGINT, signalHandler);
     if (epoll_fd == -1)
     {
         cerr << "Failed to create epoll instance." << endl;
@@ -671,16 +712,16 @@ int main()
                 handleUDPSocketEvent(events[i].data.fd);
             }
         }
-        cout<<"New Itr\n";
-        for (const auto &clientIP : roomID_IP_ports)
-        {
-            cout<<"Room ID: "<<clientIP.first<<" Total number of clients: "<<clientIP.second.size()<<endl;
-            for(const auto &vector : clientIP.second)
-            {
-                cout<<vector.first<<" "<<vector.second.first<<endl;
-            }
-            cout<<"--------------------------------"<<endl;
-        }
+        // cout<<"New Itr\n";
+        // for (const auto &clientIP : roomID_IP_ports)
+        // {
+        //     cout<<"Room ID: "<<clientIP.first<<"  Total number of clients: "<<clientIP.second.size()<<endl;
+        //     for(const auto &vector : clientIP.second)
+        //     {
+        //         cout<<vector.first<<" "<<vector.second.first<<endl;
+        //     }
+        //     cout<<"--------------------------------"<<endl;
+        // }
     }
     //map<string, vector<pair<string, pair<int, int>>>> roomID_IP_ports
     
